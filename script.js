@@ -94,7 +94,19 @@ async function downloadNovel(title, episodeLinks, startEpisode) {
     const startingIndex = startEpisode - 1;
     const totalEpisodes = episodeLinks.length - startingIndex;
     const zip = new JSZip();
+
+    let processedCount = 0; // [추가] 휴식 체크를 위한 카운터
+
     for (let i = startingIndex; i < episodeLinks.length; i++) {
+        // --- [추가된 휴식 로직] ---
+        if (processedCount > 0 && processedCount % 20 === 0) {
+            for (let sec = 30; sec > 0; sec--) {
+                progressLabel.textContent = `🛡️ 서버 차단 방지 휴식 중... ${sec}초 남음`;
+                await delay(1000);
+            }
+        }
+        // -------------------------
+
         const episodeUrl = episodeLinks[i];
         const episodeNumber = i + 1;
         if (!episodeUrl.startsWith('https://booktoki')) {
@@ -133,6 +145,9 @@ async function downloadNovel(title, episodeLinks, startEpisode) {
         }
         // Add to ZIP instead of individual downloads
         zip.file(`${title} - Episode ${episodeNumber}.txt`, episodeContent);
+        
+        processedCount++; // [추가] 다운로드 성공 시 카운트 증가
+
         const progress = ((i - startingIndex + 1) / totalEpisodes) * 100;
         progressBar.style.width = `${progress}%`;
         const elapsedTime = new Date() - startTime;
@@ -152,6 +167,7 @@ async function downloadNovel(title, episodeLinks, startEpisode) {
     document.body.removeChild(modal);
     console.log('All chapters downloaded successfully!');
 }
+
 
 // Remaining functions remain completely unchanged
 function extractTitle() {
