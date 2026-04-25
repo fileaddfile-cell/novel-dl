@@ -1,6 +1,6 @@
 // Add JSZip library
 const script = document.createElement('script');
-script.src = 'https://cloudflare.com';
+script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
 document.head.appendChild(script);
 
 async function fetchNovelContent(url) {
@@ -23,7 +23,7 @@ async function fetchNovelContent(url) {
 function unescapeHTML(text) {
     const entities = {
         '&lt;': '<', '&gt;': '>', '&amp;': '&',
-        '&quot;': '"', '&apos;': "'", '&#39;': "'",
+        '&quot;': '"', '&apos;': "'", '&#039;': "'",
         '&nbsp;': ' ', '&ndash;': '–', '&mdash;': '—',
         '&lsquo;': '‘', '&rsquo;': '’', '&ldquo;': '“', '&rdquo;': '”'
     };
@@ -57,7 +57,7 @@ function createModal() {
     modal.id = 'downloadProgressModal';
     modal.style.display = 'block';
     modal.style.position = 'fixed';
-    modal.style.zIndex = '9999';
+    modal.style.zIndex = '1';
     modal.style.left = '0';
     modal.style.top = '0';
     modal.style.width = '100%';
@@ -76,8 +76,7 @@ function createModal() {
     return {modal, modalContent};
 }
 
-// [원본 복구] 수식 건드리지 않음
-async function downloadNovel(title, episodeLinks, startEpisode, minD, maxD) {
+async function downloadNovel(title, episodeLinks, startEpisode) {
     const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
     const {modal, modalContent} = createModal();
     document.body.appendChild(modal);
@@ -111,6 +110,7 @@ async function downloadNovel(title, episodeLinks, startEpisode, minD, maxD) {
                 resolve(confirmResult);
             });
             if (userConfirmed) {
+                // Open a new tab with the CAPTCHA URL only after user clicks OK
                 window.open(episodeUrl, '_blank');
                 const retryConfirmed = await new Promise(resolve => {
                     const confirmResult = confirm(`Please solve the CAPTCHA in the new tab. Click OK to continue downloading after solving it.`);
@@ -131,9 +131,8 @@ async function downloadNovel(title, episodeLinks, startEpisode, minD, maxD) {
                 continue;
             }
         }
+        // Add to ZIP instead of individual downloads
         zip.file(`${title} - Episode ${episodeNumber}.txt`, episodeContent);
-        
-        // [원본 수식 그대로 유지]
         const progress = ((i - startingIndex + 1) / totalEpisodes) * 100;
         progressBar.style.width = `${progress}%`;
         const elapsedTime = new Date() - startTime;
@@ -142,10 +141,9 @@ async function downloadNovel(title, episodeLinks, startEpisode, minD, maxD) {
         const remainingMinutes = Math.floor(remainingTime / (1000 * 60));
         const remainingSeconds = Math.floor((remainingTime % (1000 * 60)) / 1000);
         progressLabel.textContent = `Downloading... ${progress.toFixed(2)}% - Time remaining: ${remainingMinutes}m ${remainingSeconds}s`;
-        
-        // [수정] 팝업에서 받은 딜레이만 적용
-        await delay(Math.random() * (maxD - minD) + minD);
+        await delay(Math.random() * 500 + 1500);
     }
+    // Generate and download ZIP
     const zipContent = await zip.generateAsync({type: "blob"});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(zipContent);
@@ -155,14 +153,15 @@ async function downloadNovel(title, episodeLinks, startEpisode, minD, maxD) {
     console.log('All chapters downloaded successfully!');
 }
 
+// Remaining functions remain completely unchanged
 function extractTitle() {
     const titleElement = document.evaluate('//*[@id="content_wrapper"]/div[1]/span', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
     return titleElement ? titleElement.textContent.trim() : null;
 }
 
-function extractEpisodeLinks(doc = document) {
+function extractEpisodeLinks() {
     const episodeLinks = [];
-    const links = doc.querySelectorAll('.item-subject');
+    const links = document.querySelectorAll('.item-subject');
     links.forEach(link => {
         const episodeLink = link.getAttribute('href');
         episodeLinks.push(episodeLink);
@@ -172,7 +171,10 @@ function extractEpisodeLinks(doc = document) {
 
 async function fetchPage(url) {
     const response = await fetch(url);
-    if (!response.ok) return null;
+    if (!response.ok) {
+        console.error(`Failed to fetch page: ${url}. Status: ${response.status}`);
+        return null;
+    }
     const html = await response.text();
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, 'text/html');
@@ -181,37 +183,44 @@ async function fetchPage(url) {
 
 async function runCrawler() {
     const novelPageRule = 'https://booktoki';
-    // [버그 수정] split후 [0]으로 문자열을 확실히 가져옴
     let currentUrl = window.location.href.split('?')[0];
     if (!currentUrl.startsWith(novelPageRule)) {
-        alert('이 스크립트는 소설 목록 페이지에서 실행해야 합니다.');
+        console.log('This script should be run on the novel episode list page.');
         return;
     }
     const title = extractTitle();
-    if (!title) return;
-
-    // [팝업 추가]
-    const tpInput = prompt(`전체 목록 페이지 수:`, "1"); if (tpInput === null) return;
-    const minInput = prompt(`최소 지연 시간(초):`, "1"); if (minInput === null) return;
-    const maxInput = prompt(`최대 지연 시간(초):`, "2"); if (maxInput === null) return;
-
-    const minD = parseFloat(minInput) * 1000;
-    const maxD = parseFloat(maxInput) * 1000;
-
-    let episodeLinks = extractEpisodeLinks();
-    for (let i = 2; i <= parseInt(tpInput); i++) {
-        const pageUrl = `${currentUrl}?spage=${i}`;
-        const doc = await fetchPage(pageUrl);
-        if (doc) {
-            const pageLinks = extractEpisodeLinks(doc);
-            episodeLinks = episodeLinks.concat(pageLinks);
+    if (!title) {
+        console.log('Failed to extract the novel title.');
+        return;
+    }
+    const totalPages = prompt(`Enter the number of pages in the episode list:\n(Enter 1 if less than 1000 episodes, 2 or more for 1000+ episodes)`, '1');
+    if (!totalPages || isNaN(totalPages)) {
+        console.log('Invalid page number or input cancelled.');
+        return;
+    }
+    const totalPagesNumber = parseInt(totalPages, 10);
+    const allEpisodeLinks = [];
+    for (let page = totalPagesNumber; page >= 1; page--) {
+        const nextPageUrl = `${currentUrl}?spage=${page}`;
+        const nextPageDoc = await fetchPage(nextPageUrl);
+        if (nextPageDoc) {
+            const nextPageLinks = Array.from(nextPageDoc.querySelectorAll('.item-subject'))
+                                      .map(link => link.getAttribute('href'));
+            allEpisodeLinks.push(...nextPageLinks.reverse());
         }
     }
-    
-    if (episodeLinks.length > 0) {
-        // 원본 흐름대로 1화부터 전달
-        downloadNovel(title, episodeLinks, 1, minD, maxD);
+    const startEpisode = prompt(`Enter the starting episode number (1 to ${allEpisodeLinks.length}):`, '1');
+    if (!startEpisode || isNaN(startEpisode)) {
+        console.log('Invalid episode number or input cancelled.');
+        return;
     }
+    const startEpisodeNumber = parseInt(startEpisode, 10);
+    if (startEpisodeNumber < 1 || startEpisodeNumber > allEpisodeLinks.length) {
+        console.log('Invalid episode number. Please enter a number between 1 and the total number of episodes.');
+        return;
+    }
+    console.log(`Starting download: ${title} from episode ${startEpisodeNumber}`);
+    downloadNovel(title, allEpisodeLinks, startEpisodeNumber);
 }
 
 runCrawler();
