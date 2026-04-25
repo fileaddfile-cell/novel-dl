@@ -141,7 +141,7 @@ async function downloadNovel(title, episodeLinks, startEpisode) {
         const remainingMinutes = Math.floor(remainingTime / (1000 * 60));
         const remainingSeconds = Math.floor((remainingTime % (1000 * 60)) / 1000);
         progressLabel.textContent = `Downloading... ${progress.toFixed(2)}% - Time remaining: ${remainingMinutes}m ${remainingSeconds}s`;
-        await delay(Math.random() * 500 + 1500);
+        await delay(Math.random() * 2000 + 2000);
     }
     // Generate and download ZIP
     const zipContent = await zip.generateAsync({type: "blob"});
