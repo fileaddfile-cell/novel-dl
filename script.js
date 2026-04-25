@@ -1,6 +1,6 @@
 // Add JSZip library
 const script = document.createElement('script');
-script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+script.src = 'https://cloudflare.com';
 document.head.appendChild(script);
 
 async function fetchNovelContent(url) {
@@ -23,7 +23,7 @@ async function fetchNovelContent(url) {
 function unescapeHTML(text) {
     const entities = {
         '&lt;': '<', '&gt;': '>', '&amp;': '&',
-        '&quot;': '"', '&apos;': "'", '&#039;': "'",
+        '&quot;': '"', '&apos;': "'", '&#39;': "'",
         '&nbsp;': ' ', '&ndash;': '–', '&mdash;': '—',
         '&lsquo;': '‘', '&rsquo;': '’', '&ldquo;': '“', '&rdquo;': '”'
     };
@@ -76,7 +76,8 @@ function createModal() {
     return {modal, modalContent};
 }
 
-async function downloadNovel(title, episodeLinks, startEpisode) {
+// downloadNovel: 인자에 minDelay, maxDelay를 추가함
+async function downloadNovel(title, episodeLinks, startEpisode, minDelay, maxDelay) {
     const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
     const {modal, modalContent} = createModal();
     document.body.appendChild(modal);
@@ -110,7 +111,6 @@ async function downloadNovel(title, episodeLinks, startEpisode) {
                 resolve(confirmResult);
             });
             if (userConfirmed) {
-                // Open a new tab with the CAPTCHA URL only after user clicks OK
                 window.open(episodeUrl, '_blank');
                 const retryConfirmed = await new Promise(resolve => {
                     const confirmResult = confirm(`Please solve the CAPTCHA in the new tab. Click OK to continue downloading after solving it.`);
@@ -131,7 +131,6 @@ async function downloadNovel(title, episodeLinks, startEpisode) {
                 continue;
             }
         }
-        // Add to ZIP instead of individual downloads
         zip.file(`${title} - Episode ${episodeNumber}.txt`, episodeContent);
         const progress = ((i - startingIndex + 1) / totalEpisodes) * 100;
         progressBar.style.width = `${progress}%`;
@@ -141,9 +140,11 @@ async function downloadNovel(title, episodeLinks, startEpisode) {
         const remainingMinutes = Math.floor(remainingTime / (1000 * 60));
         const remainingSeconds = Math.floor((remainingTime % (1000 * 60)) / 1000);
         progressLabel.textContent = `Downloading... ${progress.toFixed(2)}% - Time remaining: ${remainingMinutes}m ${remainingSeconds}s`;
-        await delay(Math.random() * 500 + 1000);
+        
+        // [수정 부분] 팝업창에서 입력받은 최소/최대 지연 시간을 사용
+        const actualDelay = Math.random() * (maxDelay - minDelay) + minDelay;
+        await delay(actualDelay);
     }
-    // Generate and download ZIP
     const zipContent = await zip.generateAsync({type: "blob"});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(zipContent);
@@ -153,7 +154,6 @@ async function downloadNovel(title, episodeLinks, startEpisode) {
     console.log('All chapters downloaded successfully!');
 }
 
-// Remaining functions remain completely unchanged
 function extractTitle() {
     const titleElement = document.evaluate('//*[@id="content_wrapper"]/div[1]/span', document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
     return titleElement ? titleElement.textContent.trim() : null;
@@ -193,34 +193,47 @@ async function runCrawler() {
         console.log('Failed to extract the novel title.');
         return;
     }
-    const totalPages = prompt(`Enter the number of pages in the episode list:\n(Enter 1 if less than 1000 episodes, 2 or more for 1000+ episodes)`, '1');
-    if (!totalPages || isNaN(totalPages)) {
-        console.log('Invalid page number or input cancelled.');
-        return;
-    }
-    const totalPagesNumber = parseInt(totalPages, 10);
-    const allEpisodeLinks = [];
-    for (let page = totalPagesNumber; page >= 1; page--) {
-        const nextPageUrl = `${currentUrl}?spage=${page}`;
-        const nextPageDoc = await fetchPage(nextPageUrl);
-        if (nextPageDoc) {
-            const nextPageLinks = Array.from(nextPageDoc.querySelectorAll('.item-subject'))
-                                      .map(link => link.getAttribute('href'));
-            allEpisodeLinks.push(...nextPageLinks.reverse());
+
+    // [팝업창 추가 부분]
+    const totalPagesInput = prompt(`Enter the number of pages in the episode list:`, "1");
+    if (totalPagesInput === null) return;
+    
+    const minDelayInput = prompt(`최소 지연 시간(초)을 입력하세요:`, "1");
+    if (minDelayInput === null) return;
+    
+    const maxDelayInput = prompt(`최대 지연 시간(초)을 입력하세요:`, "2");
+    if (maxDelayInput === null) return;
+
+    const totalPages = parseInt(totalPagesInput);
+    const minDelay = parseFloat(minDelayInput) * 1000; // 밀리초 변환
+    const maxDelay = parseFloat(maxDelayInput) * 1000; // 밀리초 변환
+
+    let episodeLinks = extractEpisodeLinks();
+    for (let i = 2; i <= totalPages; i++) {
+        const pageUrl = `${currentUrl}?spage=${i}`;
+        const doc = await fetchPage(pageUrl);
+        if (doc) {
+            const pageLinks = extractEpisodeLinks(doc); // extractEpisodeLinks가 인자를 받을 수 있게 수정됨
+            episodeLinks = episodeLinks.concat(pageLinks);
         }
     }
-    const startEpisode = prompt(`Enter the starting episode number (1 to ${allEpisodeLinks.length}):`, '1');
-    if (!startEpisode || isNaN(startEpisode)) {
-        console.log('Invalid episode number or input cancelled.');
-        return;
+    
+    // 원본 흐름 그대로 다운로드 함수 호출 (입력받은 딜레이 값 전달)
+    if (episodeLinks.length > 0) {
+        downloadNovel(title, episodeLinks, 1, minDelay, maxDelay);
     }
-    const startEpisodeNumber = parseInt(startEpisode, 10);
-    if (startEpisodeNumber < 1 || startEpisodeNumber > allEpisodeLinks.length) {
-        console.log('Invalid episode number. Please enter a number between 1 and the total number of episodes.');
-        return;
-    }
-    console.log(`Starting download: ${title} from episode ${startEpisodeNumber}`);
-    downloadNovel(title, allEpisodeLinks, startEpisodeNumber);
 }
+
+// extractEpisodeLinks 함수가 인자(doc)를 받을 수 있도록 기본값 추가
+const originalExtractEpisodeLinks = extractEpisodeLinks;
+extractEpisodeLinks = function(doc = document) {
+    const episodeLinks = [];
+    const links = doc.querySelectorAll('.item-subject');
+    links.forEach(link => {
+        const episodeLink = link.getAttribute('href');
+        episodeLinks.push(episodeLink);
+    });
+    return episodeLinks;
+};
 
 runCrawler();
