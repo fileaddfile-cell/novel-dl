@@ -57,7 +57,7 @@ function createModal() {
     modal.id = 'downloadProgressModal';
     modal.style.display = 'block';
     modal.style.position = 'fixed';
-    modal.style.zIndex = '1';
+    modal.style.zIndex = '9999';
     modal.style.left = '0';
     modal.style.top = '0';
     modal.style.width = '100%';
@@ -76,8 +76,8 @@ function createModal() {
     return {modal, modalContent};
 }
 
-// downloadNovel: 인자에 minDelay, maxDelay를 추가함
-async function downloadNovel(title, episodeLinks, startEpisode, minDelay, maxDelay) {
+// [원본 복구] 수식 건드리지 않음
+async function downloadNovel(title, episodeLinks, startEpisode, minD, maxD) {
     const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
     const {modal, modalContent} = createModal();
     document.body.appendChild(modal);
@@ -132,6 +132,8 @@ async function downloadNovel(title, episodeLinks, startEpisode, minDelay, maxDel
             }
         }
         zip.file(`${title} - Episode ${episodeNumber}.txt`, episodeContent);
+        
+        // [원본 수식 그대로 유지]
         const progress = ((i - startingIndex + 1) / totalEpisodes) * 100;
         progressBar.style.width = `${progress}%`;
         const elapsedTime = new Date() - startTime;
@@ -141,9 +143,8 @@ async function downloadNovel(title, episodeLinks, startEpisode, minDelay, maxDel
         const remainingSeconds = Math.floor((remainingTime % (1000 * 60)) / 1000);
         progressLabel.textContent = `Downloading... ${progress.toFixed(2)}% - Time remaining: ${remainingMinutes}m ${remainingSeconds}s`;
         
-        // [수정 부분] 팝업창에서 입력받은 최소/최대 지연 시간을 사용
-        const actualDelay = Math.random() * (maxDelay - minDelay) + minDelay;
-        await delay(actualDelay);
+        // [수정] 팝업에서 받은 딜레이만 적용
+        await delay(Math.random() * (maxD - minD) + minD);
     }
     const zipContent = await zip.generateAsync({type: "blob"});
     const a = document.createElement('a');
@@ -159,9 +160,9 @@ function extractTitle() {
     return titleElement ? titleElement.textContent.trim() : null;
 }
 
-function extractEpisodeLinks() {
+function extractEpisodeLinks(doc = document) {
     const episodeLinks = [];
-    const links = document.querySelectorAll('.item-subject');
+    const links = doc.querySelectorAll('.item-subject');
     links.forEach(link => {
         const episodeLink = link.getAttribute('href');
         episodeLinks.push(episodeLink);
@@ -171,10 +172,7 @@ function extractEpisodeLinks() {
 
 async function fetchPage(url) {
     const response = await fetch(url);
-    if (!response.ok) {
-        console.error(`Failed to fetch page: ${url}. Status: ${response.status}`);
-        return null;
-    }
+    if (!response.ok) return null;
     const html = await response.text();
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, 'text/html');
@@ -183,57 +181,37 @@ async function fetchPage(url) {
 
 async function runCrawler() {
     const novelPageRule = 'https://booktoki';
+    // [버그 수정] split후 [0]으로 문자열을 확실히 가져옴
     let currentUrl = window.location.href.split('?')[0];
     if (!currentUrl.startsWith(novelPageRule)) {
-        console.log('This script should be run on the novel episode list page.');
+        alert('이 스크립트는 소설 목록 페이지에서 실행해야 합니다.');
         return;
     }
     const title = extractTitle();
-    if (!title) {
-        console.log('Failed to extract the novel title.');
-        return;
-    }
+    if (!title) return;
 
-    // [팝업창 추가 부분]
-    const totalPagesInput = prompt(`Enter the number of pages in the episode list:`, "1");
-    if (totalPagesInput === null) return;
-    
-    const minDelayInput = prompt(`최소 지연 시간(초)을 입력하세요:`, "1");
-    if (minDelayInput === null) return;
-    
-    const maxDelayInput = prompt(`최대 지연 시간(초)을 입력하세요:`, "2");
-    if (maxDelayInput === null) return;
+    // [팝업 추가]
+    const tpInput = prompt(`전체 목록 페이지 수:`, "1"); if (tpInput === null) return;
+    const minInput = prompt(`최소 지연 시간(초):`, "1"); if (minInput === null) return;
+    const maxInput = prompt(`최대 지연 시간(초):`, "2"); if (maxInput === null) return;
 
-    const totalPages = parseInt(totalPagesInput);
-    const minDelay = parseFloat(minDelayInput) * 1000; // 밀리초 변환
-    const maxDelay = parseFloat(maxDelayInput) * 1000; // 밀리초 변환
+    const minD = parseFloat(minInput) * 1000;
+    const maxD = parseFloat(maxInput) * 1000;
 
     let episodeLinks = extractEpisodeLinks();
-    for (let i = 2; i <= totalPages; i++) {
+    for (let i = 2; i <= parseInt(tpInput); i++) {
         const pageUrl = `${currentUrl}?spage=${i}`;
         const doc = await fetchPage(pageUrl);
         if (doc) {
-            const pageLinks = extractEpisodeLinks(doc); // extractEpisodeLinks가 인자를 받을 수 있게 수정됨
+            const pageLinks = extractEpisodeLinks(doc);
             episodeLinks = episodeLinks.concat(pageLinks);
         }
     }
     
-    // 원본 흐름 그대로 다운로드 함수 호출 (입력받은 딜레이 값 전달)
     if (episodeLinks.length > 0) {
-        downloadNovel(title, episodeLinks, 1, minDelay, maxDelay);
+        // 원본 흐름대로 1화부터 전달
+        downloadNovel(title, episodeLinks, 1, minD, maxD);
     }
 }
-
-// extractEpisodeLinks 함수가 인자(doc)를 받을 수 있도록 기본값 추가
-const originalExtractEpisodeLinks = extractEpisodeLinks;
-extractEpisodeLinks = function(doc = document) {
-    const episodeLinks = [];
-    const links = doc.querySelectorAll('.item-subject');
-    links.forEach(link => {
-        const episodeLink = link.getAttribute('href');
-        episodeLinks.push(episodeLink);
-    });
-    return episodeLinks;
-};
 
 runCrawler();
